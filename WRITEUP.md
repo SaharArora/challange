@@ -1,4 +1,4 @@
-# Technical Writeup - Quote Parser Implementation
+## Writeup for Quote Parser Implementation
 
 ## How Different Quote Formats Were Handled
 
