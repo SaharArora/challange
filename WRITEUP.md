@@ -1,151 +1,124 @@
-## Writeup for Quote Parser Implementation
+# Technical Writeup
 
-## How Different Quote Formats Were Handled
+## How I Handled Different Quote Formats
 
-### Multi-Format Detection Strategy
-- Implemented hierarchical format detection using company-specific keywords
-- Used case-insensitive text matching across entire document content
-- Applied fallback cascade when primary detection fails
-- Ordered detection from most specific to most generic formats
+### Format Detection
+- Built keyword matching system that searches for company names in PDF text
+- Converted all text to uppercase for reliable string matching
+- Created fallback system that tries VTN → Sematool → Thirty-Two Machine parsers in order
+- If no format detected, attempts all parsers sequentially *(could improve with ML classification)*
 
-### Format-Specific Parsing Approaches
+### VTN Manufacturing Parser
+- Used regex to find lines starting with numbers (quantities)
+- Validated quantities are under 10,000 to avoid treating item codes as quantities
+- Extracted prices by finding rightmost numeric values on each line
+- Removed prices from line text to isolate descriptions
+- Used regex to remove common item code patterns from descriptions
+- Grouped parsed items by quantity to handle multi-quantity quotes
 
-#### VTN Manufacturing Format
-- **Structure**: Line-based with quantity-prefixed items (`Quantity [ItemCode] Description UnitPrice Amount`)
-- **Key Features**: 
-  - Regex-based quantity detection with validation (quantities ≤ 10,000)
-  - Item code pattern removal using regex substitution
-  - Price extraction from rightmost numeric values
-  - Grouped line items by quantity for multi-quantity quotes
+### Sematool Parser
+- Searched for header lines containing words like 'item', 'description', 'quantity'
+- Parsed each line after the header as a table row
+- Extracted quantities by finding numbers that aren't part of price values
+- Combined all items into single quote with calculated average unit price
+- Manually removed '/EA' and '/EACH' text from descriptions *(could improve with standardized unit parsing)*
 
-#### Sematool Tabular Format
-- **Structure**: Traditional table with clear column headers
-- **Key Features**:
-  - Header line detection using keyword matching (`item`, `description`, `quantity`, `price`)
-  - Row-by-row parsing after header identification
-  - Price isolation by removing quantity numbers from consideration
-  - Single quote group aggregation with calculated averages
+### Thirty-Two Machine Parser
+- Built state machine that accumulates description lines until hitting price data
+- Used regex pattern to detect lines ending with `quantity, price, total` format
+- Joined multi-line descriptions with spaces
+- Cleaned CSV formatting and quote characters from extracted data
+- Combined all items into single quote group
 
-#### Thirty-Two Machine Format
-- **Structure**: Multi-line descriptions with trailing CSV-style data
-- **Key Features**:
-  - State-based parsing accumulating description lines
-  - Regex pattern matching for trailing `Qty, Rate, Total` format
-  - Multi-line description consolidation and cleaning
-  - Quote character and comma handling for CSV-embedded data
+### Price Normalization Function
+- Created single function that handles `$2,000.00`, `€1,234.56`, `1500` formats
+- Strips currency symbols (`$`, `€`, `£`, `¥`) and commas
+- Handles negative values and missing decimal places
+- Returns consistent `XXXX.XX` string format
+- Falls back to `"0.00"` for unparseable values *(could improve with currency detection)*
 
-### Universal Price Normalization
-- Removed currency symbols (`$`, `€`, `£`, `¥`) and formatting characters
-- Handled comma-separated thousands and various decimal formats
-- Processed negative values and edge cases
-- Standardized output to `XXXX.XX` decimal format
+## Assumptions and Fallbacks Used
 
-## Assumptions and Fallbacks
+### Hard-Coded Assumptions
+- Quantities over 10,000 are item codes, not actual quantities
+- Rightmost numbers on lines are prices/costs
+- Text remaining after removing quantities and prices is the description
+- All prices use same currency within a quote
+- Valid items must have description, quantity > 0, and price > 0
 
-### Core Assumptions
-- **Quantity Limits**: Values > 10,000 treated as item codes, not quantities
-- **Price Position**: Rightmost numeric values assumed to be costs/prices in ambiguous cases
-- **Currency Consistency**: All prices within a quote use same currency system
-- **Description Logic**: Remaining text after removing quantities/prices represents descriptions
-- **Line Item Validity**: Items require non-empty description, valid quantity, and non-zero prices
+### Built-In Fallbacks
+- If format detection fails: try all parsers in sequence
+- If individual line fails: skip line, continue processing
+- If quantity missing: default to `"1"`
+- If price invalid: default to `"0.00"`
+- If description empty: use remaining cleaned text
+- If no items parsed: return empty array *(could improve with better error messages)*
 
-### Fallback Mechanisms
-- **Format Detection Cascade**: Try each parser in complexity order if primary detection fails
-- **Generic Parsing**: Regex-based extraction when structured parsing unsuccessful
-- **Default Value Assignment**:
-  - Missing quantity → `"1"`
-  - Invalid prices → `"0.00"`
-  - Empty descriptions → Use cleaned line text
-- **Error Isolation**: Individual line parsing failures don't stop document processing
+### Error Handling I Added
+- Wrapped each line parsing in try/except blocks
+- Continued processing rest of document when individual items fail  
+- Filtered out items with missing required fields
+- Used multiple regex patterns as backups for price extraction
 
-### Error Handling Strategy
-- **Graceful Degradation**: Continue processing despite individual item extraction failures
-- **Validation Gates**: Exclude incomplete items from final output
-- **Exception Wrapping**: Catch and log parsing errors without crashing
-- **Multiple Regex Patterns**: Various price detection patterns for format flexibility
+## Scalability
+
+### What I Built
+- Command-line tool that processes PDFs sequentially one at a time
+- Built-in support for multiple input methods: single files, directories, glob patterns
+- JSON output with option for separate files per PDF or combined results
+- Memory management by closing PyMuPDF documents after text extraction
+- Batch processing capability through file discovery system
+
+### Current Limitations and Improvements
+- **Processing**: Single-threaded execution *(improve: add multiprocessing for parallel PDF handling)*
+- **Memory**: Loads entire PDF text into memory at once *(improve: streaming/page-by-page processing)*
+- **Storage**: File-based JSON output only *(improve: database integration for large-scale storage)*
+- **API**: CLI-only interface *(improve: REST API for web integration)*
+- **Caching**: No result caching between runs *(improve: cache parsed results to avoid re-processing)*
+- **Monitoring**: Basic console output only *(improve: metrics collection and monitoring)*
+
+## Robustness
+
+### Error Handling I Built
+- Try/except blocks around PDF text extraction with graceful failure
+- Individual line parsing wrapped in exception handling to continue processing
+- File existence checking before attempting to process PDFs
+- Input validation for command-line arguments
+- Fallback cascade when format detection fails
+- Filtering of incomplete/invalid items before output
+
+### Robustness Features Added
+- Multiple regex patterns as backup for price extraction
+- Default value assignment when data is missing or invalid
+- Format detection that tries multiple parsers if first attempt fails
+- Glob pattern support for flexible file input handling
+- Continued processing even when individual PDFs fail
+- Summary reporting of successful vs failed parses
+
+### Current Gaps and Improvements
+- **PDF Corruption**: Basic PyMuPDF error handling *(improve: add PDF repair/recovery)*
+- **Network Issues**: No handling for remote PDF sources *(improve: add retry logic with exponential backoff)*
+- **Resource Limits**: No protection against very large files *(improve: add file size limits and timeouts)*
+- **Data Validation**: Limited validation of extracted data *(improve: add business rule validation)*
+- **Recovery**: No ability to resume failed batch jobs *(improve: add checkpoint/resume functionality)*
+- **Logging**: Basic print statements *(improve: structured logging with different severity levels)*
 
 ## Ideas for Improving Accuracy and Reliability
 
-### Enhanced Format Detection
-- **Structural Analysis**: Implement table detection and column alignment analysis
-- **Machine Learning Classification**: Train models on quote structure features rather than keywords
-- **Confidence Scoring**: Add probability scores for format detection decisions
-- **Template Matching**: Learn and store successful parsing templates for reuse
+### What I Built vs What Could Be Better
+- **Format Detection**: Used simple keyword search *(improve: train ML classifier on document structure)*
+- **Price Extraction**: Used regex patterns for common US formats *(improve: support international currency formats)*  
+- **Description Cleaning**: Used basic regex to remove item codes *(improve: use NLP for smarter text parsing)*
+- **Validation**: Only checked for non-zero values *(improve: validate price × quantity = total)*
+- **Processing**: Single-threaded file processing *(improve: add parallel processing)*
+- **Output**: JSON files only *(improve: add database storage and API)*
+- **Error Reporting**: Basic console output *(improve: detailed logging and metrics)*
+- **Testing**: Manual testing on sample files *(improve: automated test suite)*
 
-### Advanced Price Extraction
-- **Currency-Aware Parsing**: Implement locale detection and currency-specific formatting rules
-- **International Number Formats**: Support non-standard separators (e.g., `1,23,456.78`)
-- **Context Validation**: Cross-check unit prices against totals for proportionality
-- **Price Range Validation**: Flag outliers based on historical data or industry standards
-
-### Description Quality Enhancement
-- **NLP Integration**: Use natural language processing for better text segmentation
-- **Part Number Standardization**: Implement industry-standard part numbering recognition
-- **Technical Specification Extraction**: Parse and normalize technical details
-- **Duplicate Detection**: Identify and consolidate similar items across quote groups
-
-### Data Validation and Quality Assurance
-- **Mathematical Validation**: Cross-check calculated totals against stated document totals
-- **Relationship Validation**: Verify quantity-price relationships and bulk pricing logic
-- **Unit Consistency**: Standardize and validate units (each/dozen/hundred/per pound)
-- **Completeness Scoring**: Rate parsing confidence and flag low-quality extractions
-
-### Multi-Language and Internationalization
-- **Unicode Normalization**: Handle international characters and encoding variations
-- **Multi-Language Keywords**: Expand detection beyond English-only terms
-- **Regional Currency Support**: Recognize currency symbols across different locales
-- **Date Format Handling**: Parse various international date formats in quotes
-
-## Scalability Considerations
-
-### Performance Optimization
-- **Parallel Processing**: Implement multi-process PDF handling using `ProcessPoolExecutor`
-- **Memory Management**: Stream large PDFs page-by-page to reduce memory footprint
-- **Result Caching**: Cache intermediate parsing results for repeated processing
-- **Lazy Loading**: Process files on-demand rather than batch loading into memory
-
-### Distributed Architecture
-- **Message Queue Integration**: Use Redis/RabbitMQ for job distribution across workers
-- **Microservice Decomposition**:
-  - PDF extraction service
-  - Format detection service  
-  - Parsing engine service
-  - Validation and quality service
-  - API orchestration gateway
-- **Load Balancing**: Distribute processing across multiple instances
-- **Auto-scaling**: Dynamic worker allocation based on queue depth
-
-### Database Integration
-- **Time-Series Storage**: Track quote history and pricing trends over time
-- **Document Store**: MongoDB/Elasticsearch for flexible schema and full-text search
-- **Relational Database**: Normalized storage for structured reporting and analytics
-- **Caching Layer**: Redis for frequently accessed quote data and parsing results
-- **Data Warehousing**: ETL pipeline for business intelligence and trend analysis
-
-### Monitoring and Reliability
-- **Health Metrics**: Track processing time, success rates, error types, and throughput
-- **Alerting System**: Notify on processing failures, unusual patterns, or performance degradation
-- **Circuit Breakers**: Prevent cascade failures in distributed processing
-- **Retry Logic**: Exponential backoff for transient failures
-- **Dead Letter Queues**: Separate handling for consistently failing documents
-
-### Machine Learning Integration
-- **Adaptive Format Detection**: Continuously improve models based on new quote types
-- **Price Anomaly Detection**: Learn normal pricing patterns to flag unusual quotes
-- **Field Extraction Models**: Train on human-corrected results for better accuracy
-- **Feedback Loop System**: Collect human corrections to retrain and improve models
-- **A/B Testing Framework**: Compare parsing strategies and optimize performance
-
-### Horizontal Scaling Architecture
-- **Container Orchestration**: Docker + Kubernetes for elastic scaling
-- **API Rate Limiting**: Protect services from overload with request throttling
-- **Data Partitioning**: Shard large datasets across multiple storage systems
-- **CDN Integration**: Cache frequently accessed results and static resources
-- **Global Distribution**: Multi-region deployment for reduced latency
-
-### Performance Benchmarks and Projections
-- **Current Performance**: 2-3 seconds per PDF, ~50MB memory usage
-- **Single Machine Capacity**: 1,000-2,000 PDFs/hour
-- **Distributed Capacity**: 10,000+ PDFs/hour with proper architecture
-- **Storage Efficiency**: ~1KB per parsed quote in JSON format
-- **Accuracy Metrics**: 85-95% depending on format complexity
+### Specific Reliability Improvements Needed
+- Cross-validate calculated totals against document totals *(math validation)*
+- Add confidence scoring for parsed results *(quality metrics)*
+- Handle multi-currency quotes *(international support)* 
+- Detect and merge duplicate items *(data deduplication)*
+- Add retry logic for PDF extraction failures *(robustness)*
+- Create feedback system for human corrections *(continuous improvement)*
