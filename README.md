@@ -12,11 +12,11 @@ Setup Instructions
 
 To get this tool running, follow these steps:
 
-    Clone the Repository (if you have one):
-    If this code is part of a larger repository, clone it first:
+    Clone the Repository:
+    Clone the project from GitHub:
 
-    git clone <repository_url>
-    cd <repository_name>
+    git clone https://github.com/SaharArora/challange
+    cd challange
 
     If you just have the Python file, simply save it to your computer.
 
@@ -77,3 +77,4 @@ Examples
     Process a few specific PDF files and combine their results:
 
     python quote_parser.py VendraSampleQuote-01.pdf VendraSampleQuote-03.pdf --out combined_quotes.json
+
